@@ -13,13 +13,9 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         * { font-family: 'Be Vietnam Pro', sans-serif; }
-
-        /* ===== SCROLLBAR ===== */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f5f9; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
-
-        /* ===== ANIMATIONS ===== */
         @keyframes fadeUp {
             from { opacity: 0; transform: translateY(16px); }
             to   { opacity: 1; transform: translateY(0); }
@@ -30,72 +26,61 @@
             100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(59,130,246,0); }
         }
         .fade-up { animation: fadeUp 0.35s ease both; }
-        .pulse-ring { animation: pulse-ring 1.8s infinite; }
-
-        /* ===== MACHINE CARD ===== */
-        .machine-card {
-            position: relative;
-            transition: transform 0.18s ease, box-shadow 0.18s ease;
-        }
-        .machine-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 24px -6px rgba(0,0,0,0.15);
-            z-index: 2;
-        }
-        .machine-card.status-ok    { background:#f0fdf4; border-color:#86efac; }
-        .machine-card.status-broken{ background:#fff1f2; border-color:#fca5a5; }
-        .machine-card.status-pending{ background:#fff; border-color:#e2e8f0; }
-
-        /* ===== MIC BAR ===== */
+        .machine-card { position: relative; transition: transform 0.18s ease, box-shadow 0.18s ease; }
+        .machine-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px -6px rgba(0,0,0,0.15); z-index: 2; }
+        .machine-card.status-ok     { background:#f0fdf4; border-color:#86efac; }
+        .machine-card.status-broken { background:#fff1f2; border-color:#fca5a5; }
+        .machine-card.status-pending{ background:#fff;    border-color:#e2e8f0; }
         .mic-bar { transition: width 60ms linear; }
-
-        /* ===== MODAL BACKDROP ===== */
-        .modal-backdrop {
-            background: rgba(15,23,42,0.65);
-            backdrop-filter: blur(6px);
-        }
-
-        /* ===== PROGRESS BAR ===== */
+        .modal-backdrop { background: rgba(15,23,42,0.65); backdrop-filter: blur(6px); }
         .progress-bar { transition: width 0.4s ease; }
-
-        /* ===== STATS BADGE ===== */
-        .stat-chip {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 4px 12px; border-radius: 99px; font-size: 13px; font-weight: 600;
-        }
     </style>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <div id="root"></div>
 
-<!-- ==================== REACT APP ==================== -->
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-// ─── CẤU HÌNH GAS ──────────────────────────────────────────────────────────
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFBuXBhlwLq7z8gA_wRzEuNzQqcCn9JOBqKSuGOtYXXFVkkPT4fUfyb57MlCNe8UC4CQ/exec';
 
-// ─── DỮ LIỆU ───────────────────────────────────────────────────────────────
-const ROOMS_CONFIG = [
+// ── CẤU HÌNH MẶC ĐỊNH ─────────────────────────────────────────────────────
+const DEFAULT_CONFIG = [
     { name: 'B406', main: ['129','131','133','134','135','137','139','141','143','145','147','149','151','153','155','157','159','161','163','165','167','169','171','173','175','177','179','181','183','185','187','189','191'], backup: ['130','140','142','154','162','178'] },
     { name: 'B407', main: ['65','67','69','71','73','75','77','79','81','83','85','87','89','91','93','95','97','99','101','103','105','107','109','111','113','115','117','119','121','123','125','127','84'], backup: ['68','74','86','98','102','104'] },
     { name: 'B409', main: ['01','03','05','07','09','11','13','15','17','19','21','23','25','27','29','31','33','35','37','39','41','43','45','47','49','51','53','55','57','59','61','63','32'], backup: ['12','22','26','28','30','42'] }
 ];
 
-const generateInitialData = () => {
+const CONFIG_KEY   = 'vstep_room_config_v2';
+const CHECKLIST_KEY = 'vstep_checklist_v3';
+
+function loadConfig() {
+    try { const s = localStorage.getItem(CONFIG_KEY); return s ? JSON.parse(s) : DEFAULT_CONFIG; }
+    catch(e) { return DEFAULT_CONFIG; }
+}
+function saveConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
+
+function generateMachines(config) {
     const machines = [];
-    ROOMS_CONFIG.forEach(room => {
-        room.main.forEach(id => machines.push({ id, room: room.name, isMain: true, status: 'pending', checks: { lan: false, camera: false, mic: false, headphone: false }, notes: '' }));
-        room.backup.forEach(id => machines.push({ id, room: room.name, isMain: false, status: 'pending', checks: { lan: false, camera: false, mic: false, headphone: false }, notes: '' }));
+    config.forEach(room => {
+        room.main.forEach(id => machines.push({ id, room: room.name, isMain: true,  status: 'pending', checks: { lan:false, camera:false, mic:false, headphone:false }, notes:'' }));
+        room.backup.forEach(id => machines.push({ id, room: room.name, isMain: false, status: 'pending', checks: { lan:false, camera:false, mic:false, headphone:false }, notes:'' }));
     });
     return machines;
-};
+}
 
-// ─── TOAST ─────────────────────────────────────────────────────────────────
+// ── MERGE: giữ kết quả đã kiểm, bỏ máy không còn trong config ────────────
+function mergeWithChecklist(newMachines, savedMachines) {
+    const savedMap = {};
+    savedMachines.forEach(m => { savedMap[`${m.room}-${m.id}`] = m; });
+    return newMachines.map(m => savedMap[`${m.room}-${m.id}`] || m);
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────────────
 function Toast({ message, type, onClose }) {
     useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, []);
-    const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
-    const icons  = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle' };
+    const colors = { success:'bg-emerald-600', error:'bg-red-600', info:'bg-blue-600' };
+    const icons  = { success:'fa-check-circle', error:'fa-times-circle', info:'fa-info-circle' };
     return (
         <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl text-white shadow-2xl fade-up ${colors[type]}`}>
             <i className={`fas ${icons[type]}`}></i>
@@ -105,29 +90,189 @@ function Toast({ message, type, onClose }) {
     );
 }
 
-// ─── TEST MODAL ─────────────────────────────────────────────────────────────
+// ── MODAL CHỈNH SỬA PHÒNG ──────────────────────────────────────────────────
+function EditRoomModal({ config, onClose, onSave }) {
+    const [rooms, setRooms] = useState(config.map(r => ({
+        ...r,
+        mainStr:   r.main.join(', '),
+        backupStr: r.backup.join(', '),
+    })));
+
+    const [errors, setErrors] = useState({});
+
+    // Parse chuỗi "65, 67, 69" → ['65','67','69'] bỏ trống/trùng
+    function parseIds(str) {
+        return [...new Set(
+            str.split(/[\s,،]+/)
+               .map(s => s.trim().replace(/^0+(\d)/, '$1')) // bỏ leading zero trừ "01"→"1"? Giữ nguyên
+               .filter(Boolean)
+        )];
+    }
+    // Thực ra giữ nguyên format người dùng nhập (có thể "01" hoặc "1")
+    function parseIdsRaw(str) {
+        return [...new Set(
+            str.split(/[\s,،،]+/)
+               .map(s => s.trim())
+               .filter(Boolean)
+        )];
+    }
+
+    function validate() {
+        const errs = {};
+        rooms.forEach((r, i) => {
+            const main   = parseIdsRaw(r.mainStr);
+            const backup = parseIdsRaw(r.backupStr);
+            const overlap = main.filter(id => backup.includes(id));
+            if (overlap.length) errs[i] = `Máy ${overlap.join(', ')} xuất hiện ở cả 2 nhóm`;
+            if (!main.length && !backup.length) errs[i] = 'Phòng không có máy nào';
+        });
+        setErrors(errs);
+        return Object.keys(errs).length === 0;
+    }
+
+    function handleSave() {
+        if (!validate()) return;
+        const newConfig = rooms.map(r => ({
+            name:   r.name,
+            main:   parseIdsRaw(r.mainStr),
+            backup: parseIdsRaw(r.backupStr),
+        }));
+        onSave(newConfig);
+    }
+
+    function updateField(i, field, val) {
+        setRooms(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+        setErrors(prev => { const e = {...prev}; delete e[i]; return e; });
+    }
+
+    return (
+        <div className="fixed inset-0 modal-backdrop flex items-start justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl my-6 fade-up">
+
+                {/* Header */}
+                <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-900">Chỉnh sửa danh sách máy</h2>
+                        <p className="text-sm text-slate-500 mt-0.5">Thêm hoặc bớt số máy, phân cách bằng dấu phẩy</p>
+                    </div>
+                    <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center">
+                        <i className="fas fa-times text-slate-500 text-sm"></i>
+                    </button>
+                </div>
+
+                {/* Rooms */}
+                <div className="p-6 space-y-6">
+                    {rooms.map((r, i) => (
+                        <div key={r.name} className={`rounded-2xl border-2 p-4 ${errors[i] ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}>
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                                    <span className="text-white text-xs font-bold">{r.name}</span>
+                                </div>
+                                <span className="font-bold text-slate-800">Phòng {r.name}</span>
+                                <span className="text-xs text-slate-400 ml-auto">
+                                    {parseIdsRaw(r.mainStr).length} chính · {parseIdsRaw(r.backupStr).length} dự phòng
+                                </span>
+                            </div>
+
+                            {/* Máy chính */}
+                            <div className="mb-3">
+                                <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 mb-1.5">
+                                    <i className="fas fa-desktop text-blue-500 text-xs"></i>
+                                    Máy chính
+                                </label>
+                                <textarea
+                                    className="w-full border-2 border-slate-200 focus:border-blue-400 rounded-xl p-3 text-sm outline-none resize-none font-mono leading-relaxed transition-colors"
+                                    rows={3}
+                                    placeholder="65, 67, 69, 71, ..."
+                                    value={r.mainStr}
+                                    onChange={e => updateField(i, 'mainStr', e.target.value)}
+                                />
+                                {/* Quick preview count */}
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {parseIdsRaw(r.mainStr).slice(0,12).map(id => (
+                                        <span key={id} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{id}</span>
+                                    ))}
+                                    {parseIdsRaw(r.mainStr).length > 12 && (
+                                        <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">+{parseIdsRaw(r.mainStr).length - 12} máy nữa</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Máy dự phòng */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 mb-1.5">
+                                    <i className="fas fa-exclamation-circle text-amber-500 text-xs"></i>
+                                    Máy dự phòng
+                                </label>
+                                <textarea
+                                    className="w-full border-2 border-slate-200 focus:border-amber-400 rounded-xl p-3 text-sm outline-none resize-none font-mono leading-relaxed transition-colors"
+                                    rows={2}
+                                    placeholder="68, 74, 86, ..."
+                                    value={r.backupStr}
+                                    onChange={e => updateField(i, 'backupStr', e.target.value)}
+                                />
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {parseIdsRaw(r.backupStr).map(id => (
+                                        <span key={id} className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">{id}</span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {errors[i] && (
+                                <div className="mt-2 flex items-center gap-2 text-sm text-red-600 font-medium">
+                                    <i className="fas fa-exclamation-triangle text-xs"></i>
+                                    {errors[i]}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Info box */}
+                <div className="mx-6 mb-4 p-3.5 bg-blue-50 rounded-2xl border border-blue-100">
+                    <div className="flex gap-2.5">
+                        <i className="fas fa-info-circle text-blue-500 mt-0.5 shrink-0"></i>
+                        <div className="text-sm text-blue-700">
+                            <strong>Lưu ý:</strong> Kết quả đã kiểm tra của các máy <strong>còn giữ lại</strong> sẽ được giữ nguyên. Máy bị xóa khỏi danh sách sẽ <strong>không được lưu lên Sheet</strong> trong lần sau.
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex gap-3 p-6 pt-2 border-t border-slate-100">
+                    <button onClick={onClose} className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-semibold text-sm hover:bg-slate-200 transition-colors">
+                        Hủy
+                    </button>
+                    <button onClick={handleSave} className="flex-1 py-3 bg-blue-600 text-white rounded-2xl font-bold text-sm hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-100">
+                        <i className="fas fa-save"></i> Lưu cấu hình
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── TEST MODAL ──────────────────────────────────────────────────────────────
 function TestModal({ machine, onClose, onSave }) {
     const [edited, setEdited] = useState({ ...machine });
-    const videoRef  = useRef(null);
-    const streamRef = useRef(null);
-    const audioCtxRef = useRef(null);
-    const animRef   = useRef(null);
-    const [micVolume, setMicVolume]   = useState(0);
-    const [camStatus, setCamStatus]   = useState('loading'); // loading | ok | error
-    const [camError,  setCamError]    = useState('');
+    const videoRef   = useRef(null);
+    const streamRef  = useRef(null);
+    const audioCtxRef= useRef(null);
+    const animRef    = useRef(null);
+    const [micVolume,   setMicVolume]   = useState(0);
+    const [camStatus,   setCamStatus]   = useState('loading');
+    const [camError,    setCamError]    = useState('');
     const [soundPlayed, setSoundPlayed] = useState(false);
 
     useEffect(() => {
         let mounted = true;
         (async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                if (!mounted) { stream.getTracks().forEach(t => t.stop()); return; }
+                const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+                if (!mounted) { stream.getTracks().forEach(t=>t.stop()); return; }
                 streamRef.current = stream;
-                if (videoRef.current) { videoRef.current.srcObject = stream; }
+                if (videoRef.current) videoRef.current.srcObject = stream;
                 setCamStatus('ok');
-
-                // Mic meter
                 const Ctx = window.AudioContext || window.webkitAudioContext;
                 audioCtxRef.current = new Ctx();
                 const analyzer = audioCtxRef.current.createAnalyser();
@@ -136,110 +281,88 @@ function TestModal({ machine, onClose, onSave }) {
                 const buf = new Uint8Array(analyzer.frequencyBinCount);
                 const tick = () => {
                     analyzer.getByteFrequencyData(buf);
-                    const avg = buf.reduce((a,b) => a+b, 0) / buf.length;
-                    setMicVolume(avg);
+                    setMicVolume(buf.reduce((a,b)=>a+b,0)/buf.length);
                     animRef.current = requestAnimationFrame(tick);
                 };
                 tick();
-            } catch (err) {
+            } catch(err) {
                 if (!mounted) return;
                 setCamStatus('error');
-                if (err.name === 'NotAllowedError' || err.name === 'SecurityError')
-                    setCamError('Trình duyệt đã chặn quyền. Hãy nhấp vào biểu tượng 🔒 trên thanh địa chỉ để cấp quyền Camera/Mic.');
-                else if (err.name === 'NotFoundError')
-                    setCamError('Không tìm thấy Camera hoặc Microphone.');
-                else
-                    setCamError('Lỗi: ' + err.message);
+                if (err.name==='NotAllowedError'||err.name==='SecurityError') setCamError('Trình duyệt đã chặn quyền. Nhấp vào 🔒 trên thanh địa chỉ để cấp quyền.');
+                else if (err.name==='NotFoundError') setCamError('Không tìm thấy Camera hoặc Microphone.');
+                else setCamError('Lỗi: '+err.message);
             }
         })();
         return () => {
             mounted = false;
-            streamRef.current?.getTracks().forEach(t => t.stop());
+            streamRef.current?.getTracks().forEach(t=>t.stop());
             if (animRef.current) cancelAnimationFrame(animRef.current);
-            audioCtxRef.current?.state !== 'closed' && audioCtxRef.current?.close().catch(()=>{});
+            audioCtxRef.current?.state!=='closed'&&audioCtxRef.current?.close().catch(()=>{});
         };
     }, []);
 
     const playTestSound = () => {
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(523, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
-            gain.gain.setValueAtTime(0.12, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+            const ctx = new (window.AudioContext||window.webkitAudioContext)();
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.type='sine'; osc.frequency.setValueAtTime(523,ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880,ctx.currentTime+0.3);
+            gain.gain.setValueAtTime(0.12,ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.6);
             osc.connect(gain); gain.connect(ctx.destination);
-            osc.start(); osc.stop(ctx.currentTime + 0.6);
+            osc.start(); osc.stop(ctx.currentTime+0.6);
             setSoundPlayed(true);
-        } catch(e) {}
+        } catch(e){}
     };
 
-    const toggleCheck = (k) => setEdited(p => ({ ...p, checks: { ...p.checks, [k]: !p.checks[k] } }));
-    const allChecked  = Object.values(edited.checks).every(Boolean);
+    const toggleCheck = k => setEdited(p=>({...p, checks:{...p.checks,[k]:!p.checks[k]}}));
     const checkedCount = Object.values(edited.checks).filter(Boolean).length;
 
     const CHECKS = [
-        { key: 'lan',      icon: 'fa-network-wired', label: 'Mạng LAN / Internet',         color: 'blue' },
-        { key: 'camera',   icon: 'fa-camera',         label: 'Camera hoạt động tốt',         color: 'violet' },
-        { key: 'mic',      icon: 'fa-microphone',     label: 'Microphone thu âm rõ',          color: 'green' },
-        { key: 'headphone',icon: 'fa-headphones',     label: 'Tai nghe nghe rõ, không rè',   color: 'orange' },
+        {key:'lan',       icon:'fa-network-wired', label:'Mạng LAN / Internet',       color:'blue'},
+        {key:'camera',    icon:'fa-camera',         label:'Camera hoạt động tốt',       color:'violet'},
+        {key:'mic',       icon:'fa-microphone',     label:'Microphone thu âm rõ',        color:'green'},
+        {key:'headphone', icon:'fa-headphones',     label:'Tai nghe nghe rõ, không rè', color:'orange'},
     ];
     const colorMap = {
-        blue:  { ring: 'border-blue-400 bg-blue-50',   icon: 'text-blue-500',   check: 'bg-blue-500 border-blue-500'   },
-        violet:{ ring: 'border-violet-400 bg-violet-50',icon:'text-violet-500', check: 'bg-violet-500 border-violet-500'},
-        green: { ring: 'border-green-400 bg-green-50', icon: 'text-green-500',  check: 'bg-green-500 border-green-500' },
-        orange:{ ring: 'border-orange-400 bg-orange-50',icon:'text-orange-500', check: 'bg-orange-500 border-orange-500'},
+        blue:  {ring:'border-blue-400 bg-blue-50',    icon:'text-blue-500',   check:'bg-blue-500 border-blue-500'},
+        violet:{ring:'border-violet-400 bg-violet-50',icon:'text-violet-500', check:'bg-violet-500 border-violet-500'},
+        green: {ring:'border-green-400 bg-green-50',  icon:'text-green-500',  check:'bg-green-500 border-green-500'},
+        orange:{ring:'border-orange-400 bg-orange-50',icon:'text-orange-500', check:'bg-orange-500 border-orange-500'},
     };
 
     return (
         <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-3 z-50">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col md:flex-row fade-up">
-
-                {/* ── CỘT TRÁI: TEST ── */}
+                {/* Cột trái: Test */}
                 <div className="w-full md:w-[46%] flex flex-col bg-slate-900 text-white rounded-t-3xl md:rounded-l-3xl md:rounded-tr-none overflow-y-auto">
-                    {/* Header */}
                     <div className="p-5 border-b border-slate-700/60">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-slate-400 text-xs uppercase tracking-widest mb-0.5">Công cụ Test</p>
                                 <h2 className="text-lg font-bold">Phòng {machine.room} — Máy #{machine.id}</h2>
                             </div>
-                            <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${machine.isMain ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
-                                {machine.isMain ? 'Máy chính' : 'Dự phòng'}
+                            <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${machine.isMain?'bg-blue-500/20 text-blue-300 border border-blue-500/30':'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
+                                {machine.isMain?'Máy chính':'Dự phòng'}
                             </span>
                         </div>
                     </div>
-
                     <div className="p-5 flex-1 space-y-5">
                         {/* Camera */}
                         <div>
                             <div className="flex items-center gap-2 mb-2">
                                 <i className="fas fa-camera text-violet-400 text-sm"></i>
                                 <span className="text-sm font-semibold text-slate-300">Camera</span>
-                                {camStatus === 'ok'      && <span className="ml-auto text-xs text-green-400 font-medium"><i className="fas fa-circle text-[8px] mr-1"></i>Kết nối</span>}
-                                {camStatus === 'loading' && <span className="ml-auto text-xs text-slate-400"><i className="fas fa-spinner fa-spin mr-1"></i>Đang kết nối...</span>}
-                                {camStatus === 'error'   && <span className="ml-auto text-xs text-red-400 font-medium"><i className="fas fa-times-circle mr-1"></i>Lỗi</span>}
+                                {camStatus==='ok'      && <span className="ml-auto text-xs text-green-400 font-medium"><i className="fas fa-circle text-[8px] mr-1"></i>Kết nối</span>}
+                                {camStatus==='loading' && <span className="ml-auto text-xs text-slate-400"><i className="fas fa-spinner fa-spin mr-1"></i>Đang kết nối...</span>}
+                                {camStatus==='error'   && <span className="ml-auto text-xs text-red-400 font-medium"><i className="fas fa-times-circle mr-1"></i>Lỗi</span>}
                             </div>
                             <div className="rounded-2xl overflow-hidden bg-slate-800 aspect-video relative">
-                                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                                {camStatus === 'loading' && (
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <div className="w-10 h-10 border-2 border-slate-600 border-t-violet-400 rounded-full animate-spin"></div>
-                                    </div>
-                                )}
-                                {camStatus === 'error' && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center p-5 text-center">
-                                        <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3">
-                                            <i className="fas fa-video-slash text-red-400 text-xl"></i>
-                                        </div>
-                                        <p className="text-red-300 text-xs leading-relaxed">{camError}</p>
-                                    </div>
-                                )}
+                                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover"/>
+                                {camStatus==='loading' && <div className="absolute inset-0 flex items-center justify-center"><div className="w-10 h-10 border-2 border-slate-600 border-t-violet-400 rounded-full animate-spin"></div></div>}
+                                {camStatus==='error'   && <div className="absolute inset-0 flex flex-col items-center justify-center p-5 text-center"><div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3"><i className="fas fa-video-slash text-red-400 text-xl"></i></div><p className="text-red-300 text-xs leading-relaxed">{camError}</p></div>}
                             </div>
                         </div>
-
                         {/* Mic */}
                         <div>
                             <div className="flex items-center gap-2 mb-2">
@@ -248,29 +371,28 @@ function TestModal({ machine, onClose, onSave }) {
                                 <span className="ml-auto text-xs text-slate-500">Gõ nhẹ vào mic để test</span>
                             </div>
                             <div className="h-9 bg-slate-800 rounded-xl overflow-hidden relative border border-slate-700">
-                                <div className="mic-bar h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-xl" style={{ width: `${Math.min(100, micVolume * 2.2)}%` }} />
+                                <div className="mic-bar h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-xl" style={{width:`${Math.min(100,micVolume*2.2)}%`}}/>
                                 <div className="absolute inset-0 flex items-center px-3">
                                     <span className="text-xs text-slate-400 font-medium">Mức âm thanh</span>
-                                    <span className="ml-auto text-xs font-bold text-slate-300">{Math.round(Math.min(100, micVolume * 2.2))}%</span>
+                                    <span className="ml-auto text-xs font-bold text-slate-300">{Math.round(Math.min(100,micVolume*2.2))}%</span>
                                 </div>
                             </div>
                         </div>
-
                         {/* Speaker */}
                         <div>
                             <div className="flex items-center gap-2 mb-2">
                                 <i className="fas fa-headphones text-orange-400 text-sm"></i>
                                 <span className="text-sm font-semibold text-slate-300">Tai nghe / Loa</span>
                             </div>
-                            <button onClick={playTestSound} className={`w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 border ${soundPlayed ? 'bg-orange-500/20 border-orange-500/40 text-orange-300' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}>
-                                <i className={`fas ${soundPlayed ? 'fa-check' : 'fa-play'}`}></i>
-                                {soundPlayed ? 'Đã phát — Nghe thấy không?' : 'Phát âm thanh test'}
+                            <button onClick={playTestSound} className={`w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 border ${soundPlayed?'bg-orange-500/20 border-orange-500/40 text-orange-300':'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}>
+                                <i className={`fas ${soundPlayed?'fa-check':'fa-play'}`}></i>
+                                {soundPlayed?'Đã phát — Nghe thấy không?':'Phát âm thanh test'}
                             </button>
                         </div>
                     </div>
                 </div>
 
-                {/* ── CỘT PHẢI: CHECKLIST ── */}
+                {/* Cột phải: Checklist */}
                 <div className="w-full md:w-[54%] flex flex-col p-6 overflow-y-auto">
                     <div className="flex items-center justify-between mb-5">
                         <h2 className="text-xl font-bold text-slate-800">Checklist đánh giá</h2>
@@ -278,60 +400,46 @@ function TestModal({ machine, onClose, onSave }) {
                             <i className="fas fa-times text-slate-500 text-sm"></i>
                         </button>
                     </div>
-
-                    {/* Progress */}
                     <div className="mb-5">
                         <div className="flex items-center justify-between mb-1.5">
                             <span className="text-xs text-slate-500 font-medium">Tiến độ kiểm tra</span>
                             <span className="text-xs font-bold text-slate-700">{checkedCount}/4</span>
                         </div>
                         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="progress-bar h-full bg-gradient-to-r from-blue-500 to-green-500 rounded-full" style={{ width: `${checkedCount * 25}%` }} />
+                            <div className="progress-bar h-full bg-gradient-to-r from-blue-500 to-green-500 rounded-full" style={{width:`${checkedCount*25}%`}}/>
                         </div>
                     </div>
-
-                    {/* Checkboxes */}
                     <div className="space-y-2.5 mb-5 flex-grow">
-                        {CHECKS.map(({ key, icon, label, color }) => {
-                            const checked = edited.checks[key];
-                            const c = colorMap[color];
+                        {CHECKS.map(({key,icon,label,color}) => {
+                            const checked = edited.checks[key], c = colorMap[color];
                             return (
-                                <label key={key} className={`flex items-center gap-3 p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${checked ? c.ring : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
-                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${checked ? c.ring : 'bg-slate-100'}`}>
-                                        <i className={`fas ${icon} text-sm ${checked ? c.icon : 'text-slate-400'}`}></i>
+                                <label key={key} className={`flex items-center gap-3 p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${checked?c.ring:'border-slate-200 hover:border-slate-300 bg-white'}`}>
+                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${checked?c.ring:'bg-slate-100'}`}>
+                                        <i className={`fas ${icon} text-sm ${checked?c.icon:'text-slate-400'}`}></i>
                                     </div>
-                                    <span className={`font-semibold text-sm flex-1 ${checked ? 'text-slate-800' : 'text-slate-600'}`}>{label}</span>
-                                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${checked ? c.check : 'border-slate-300 bg-white'}`}>
+                                    <span className={`font-semibold text-sm flex-1 ${checked?'text-slate-800':'text-slate-600'}`}>{label}</span>
+                                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${checked?c.check:'border-slate-300 bg-white'}`}>
                                         {checked && <i className="fas fa-check text-white" style={{fontSize:'9px'}}></i>}
                                     </div>
-                                    <input type="checkbox" className="hidden" checked={checked} onChange={() => toggleCheck(key)} />
+                                    <input type="checkbox" className="hidden" checked={checked} onChange={()=>toggleCheck(key)}/>
                                 </label>
                             );
                         })}
                     </div>
-
-                    {/* Notes */}
                     <div className="mb-5">
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             <i className="fas fa-sticky-note mr-1.5 text-slate-400"></i>Ghi chú hỏng hóc
                         </label>
-                        <textarea
-                            className="w-full border-2 border-slate-200 focus:border-blue-400 rounded-2xl p-3 text-sm outline-none resize-none h-20 transition-colors placeholder:text-slate-400"
+                        <textarea className="w-full border-2 border-slate-200 focus:border-blue-400 rounded-2xl p-3 text-sm outline-none resize-none h-20 transition-colors placeholder:text-slate-400"
                             placeholder="Ví dụ: Lỏng dây mạng, tai nghe bị điếc 1 bên..."
-                            value={edited.notes}
-                            onChange={e => setEdited({...edited, notes: e.target.value})}
-                        />
+                            value={edited.notes} onChange={e=>setEdited({...edited,notes:e.target.value})}/>
                     </div>
-
-                    {/* Actions */}
                     <div className="flex gap-2.5">
-                        <button onClick={onClose} className="px-4 py-3 text-slate-600 bg-slate-100 rounded-2xl font-semibold text-sm hover:bg-slate-200 transition-colors">
-                            Hủy
-                        </button>
-                        <button onClick={() => onSave({ ...edited, status: 'broken' })} className="flex-1 py-3 text-white bg-red-500 rounded-2xl font-bold text-sm hover:bg-red-600 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-red-100">
+                        <button onClick={onClose} className="px-4 py-3 text-slate-600 bg-slate-100 rounded-2xl font-semibold text-sm hover:bg-slate-200 transition-colors">Hủy</button>
+                        <button onClick={()=>onSave({...edited,status:'broken'})} className="flex-1 py-3 text-white bg-red-500 rounded-2xl font-bold text-sm hover:bg-red-600 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-red-100">
                             <i className="fas fa-times-circle"></i> Báo Hỏng
                         </button>
-                        <button onClick={() => onSave({ ...edited, status: 'ok' })} className="flex-1 py-3 text-white bg-emerald-500 rounded-2xl font-bold text-sm hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100">
+                        <button onClick={()=>onSave({...edited,status:'ok'})} className="flex-1 py-3 text-white bg-emerald-500 rounded-2xl font-bold text-sm hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100">
                             <i className="fas fa-check-circle"></i> Đạt Chuẩn
                         </button>
                     </div>
@@ -341,79 +449,95 @@ function TestModal({ machine, onClose, onSave }) {
     );
 }
 
-// ─── APP CHÍNH ──────────────────────────────────────────────────────────────
+// ── APP CHÍNH ───────────────────────────────────────────────────────────────
 function App() {
-    const [machines,     setMachines]     = useState([]);
-    const [room,         setRoom]         = useState('B406');
-    const [selected,     setSelected]     = useState(null);
-    const [isSaving,     setIsSaving]     = useState(false);
-    const [toast,        setToast]        = useState(null);
+    const [config,      setConfig]      = useState(() => loadConfig());
+    const [machines,    setMachines]    = useState([]);
+    const [room,        setRoom]        = useState('');
+    const [selected,    setSelected]    = useState(null);
+    const [showEdit,    setShowEdit]    = useState(false);
+    const [isSaving,    setIsSaving]    = useState(false);
+    const [toast,       setToast]       = useState(null);
 
-    const showToast = (message, type = 'info') => setToast({ message, type });
+    const showToast = (message, type='info') => setToast({message, type});
+
+    // Load checklist từ localStorage, merge với config hiện tại
+    useEffect(() => {
+        const freshMachines = generateMachines(config);
+        const saved = localStorage.getItem(CHECKLIST_KEY);
+        if (saved) {
+            try {
+                const savedMachines = JSON.parse(saved);
+                setMachines(mergeWithChecklist(freshMachines, savedMachines));
+            } catch(e) { setMachines(freshMachines); }
+        } else {
+            setMachines(freshMachines);
+        }
+        if (config.length > 0) setRoom(config[0].name);
+    }, [config]);
 
     useEffect(() => {
-        const saved = localStorage.getItem('vstep_checklist_v2');
-        setMachines(saved ? JSON.parse(saved) : generateInitialData());
-    }, []);
-
-    useEffect(() => {
-        if (machines.length > 0) localStorage.setItem('vstep_checklist_v2', JSON.stringify(machines));
+        if (machines.length > 0) localStorage.setItem(CHECKLIST_KEY, JSON.stringify(machines));
     }, [machines]);
 
+    // Lưu config + tái tạo machines (giữ kết quả cũ)
+    function handleSaveConfig(newConfig) {
+        saveConfig(newConfig);
+        setConfig(newConfig);
+        setShowEdit(false);
+        showToast('Đã cập nhật danh sách máy!', 'success');
+    }
+
     const handleSave = (updated) => {
-        setMachines(prev => prev.map(m => m.id === updated.id && m.room === updated.room ? updated : m));
+        setMachines(prev => prev.map(m => m.id===updated.id && m.room===updated.room ? updated : m));
         setSelected(null);
-        showToast(updated.status === 'ok' ? `Máy ${updated.id} đã được đánh dấu Đạt ✅` : `Máy ${updated.id} đã được báo Hỏng ❌`, updated.status === 'ok' ? 'success' : 'error');
+        showToast(updated.status==='ok' ? `Máy ${updated.id} — Đạt ✅` : `Máy ${updated.id} — Báo Hỏng ❌`, updated.status==='ok'?'success':'error');
     };
 
     const saveToSheets = async () => {
         if (!GAS_URL || GAS_URL.includes('PASTE_YOUR')) {
-            showToast('Chưa cấu hình GAS_URL! Xem hướng dẫn trong file index.html', 'error');
-            return;
+            showToast('Chưa cấu hình GAS_URL!', 'error'); return;
         }
         setIsSaving(true);
         try {
-            const res = await fetch(GAS_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
+            await fetch(GAS_URL, {
+                method:'POST', mode:'no-cors',
+                headers:{'Content-Type':'application/json'},
                 body: JSON.stringify(machines)
             });
-            showToast('Đã gửi dữ liệu lên Google Sheets thành công! 🎉', 'success');
-        } catch (err) {
-            showToast('Lỗi kết nối: ' + err.message, 'error');
-        } finally {
-            setIsSaving(false);
-        }
+            showToast('Đã gửi dữ liệu lên Google Sheets! 🎉', 'success');
+        } catch(err) {
+            showToast('Lỗi kết nối: '+err.message, 'error');
+        } finally { setIsSaving(false); }
     };
 
     const clearData = () => {
-        if (!window.confirm('Xóa toàn bộ dữ liệu và bắt đầu lại?')) return;
-        setMachines(generateInitialData());
-        showToast('Đã xóa dữ liệu, bắt đầu phiên mới', 'info');
+        if (!window.confirm('Xóa toàn bộ kết quả và bắt đầu lại?')) return;
+        const fresh = generateMachines(config);
+        setMachines(fresh);
+        localStorage.removeItem(CHECKLIST_KEY);
+        showToast('Đã reset — bắt đầu phiên mới', 'info');
     };
 
     const roomMachines = machines.filter(m => m.room === room);
-    const mainList     = roomMachines.filter(m => m.isMain);
+    const mainList     = roomMachines.filter(m =>  m.isMain);
     const backupList   = roomMachines.filter(m => !m.isMain);
 
-    // Stats
-    const total   = machines.length;
-    const okCount = machines.filter(m => m.status === 'ok').length;
-    const brokenCount = machines.filter(m => m.status === 'broken').length;
-    const doneCount = okCount + brokenCount;
-    const progress = Math.round((doneCount / total) * 100);
+    const total       = machines.length;
+    const okCount     = machines.filter(m => m.status==='ok').length;
+    const brokenCount = machines.filter(m => m.status==='broken').length;
+    const doneCount   = okCount + brokenCount;
+    const progress    = total ? Math.round((doneCount/total)*100) : 0;
 
-    const statusClass = (s) => s === 'ok' ? 'status-ok' : s === 'broken' ? 'status-broken' : 'status-pending';
-    const statusIcon  = (s) => s === 'ok' ? 'fa-check text-green-500' : s === 'broken' ? 'fa-times text-red-400' : 'fa-desktop text-slate-300';
+    const statusClass = s => s==='ok'?'status-ok':s==='broken'?'status-broken':'status-pending';
+    const statusIcon  = s => s==='ok'?'fa-check text-green-500':s==='broken'?'fa-times text-red-400':'fa-desktop text-slate-300';
 
-    const MachineGrid = ({ list }) => (
+    const MachineGrid = ({list}) => (
         <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 lg:grid-cols-11 gap-2.5">
             {list.map(m => (
-                <button key={m.id + m.room} onClick={() => setSelected(m)}
+                <button key={m.id+m.room} onClick={()=>setSelected(m)}
                     className={`machine-card p-2.5 rounded-xl border-2 flex flex-col items-center gap-1.5 cursor-pointer ${statusClass(m.status)}`}
-                    title={m.notes || `Máy ${m.id} — ${m.status}`}
-                >
+                    title={m.notes||`Máy ${m.id} — ${m.status}`}>
                     <i className={`fas ${statusIcon(m.status)} text-lg`}></i>
                     <span className="font-bold text-xs text-slate-700">{m.id}</span>
                 </button>
@@ -434,13 +558,18 @@ function App() {
                             </div>
                             <h1 className="text-xl font-extrabold text-slate-900">Hệ thống Rà soát Phòng thi VSTEP</h1>
                         </div>
-                        <p className="text-slate-500 text-sm ml-11">Kiểm tra phần cứng máy tính — Camera, Mic, LAN, Tai nghe</p>
+                        <p className="text-slate-500 text-sm ml-11">Kiểm tra phần cứng — Camera · Mic · LAN · Tai nghe</p>
                     </div>
                     <div className="flex gap-2 flex-wrap">
+                        {/* NÚT CHỈNH SỬA DANH SÁCH MÁY */}
+                        <button onClick={()=>setShowEdit(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 font-semibold text-sm transition-colors shadow-md shadow-violet-100">
+                            <i className="fas fa-sliders-h"></i> Sửa danh sách máy
+                        </button>
                         <button onClick={saveToSheets} disabled={isSaving}
                             className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-semibold text-sm transition-colors shadow-md shadow-emerald-100 disabled:opacity-50">
-                            <i className={`fas ${isSaving ? 'fa-spinner fa-spin' : 'fa-cloud-upload-alt'}`}></i>
-                            {isSaving ? 'Đang lưu...' : 'Lưu lên Sheets'}
+                            <i className={`fas ${isSaving?'fa-spinner fa-spin':'fa-cloud-upload-alt'}`}></i>
+                            {isSaving?'Đang lưu...':'Lưu lên Sheets'}
                         </button>
                         <button onClick={clearData}
                             className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 font-semibold text-sm transition-colors">
@@ -452,10 +581,10 @@ function App() {
                 {/* ── STATS ── */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {[
-                        { label: 'Tổng máy',       val: total,       color: 'bg-slate-800',    icon: 'fa-desktop' },
-                        { label: 'Đã kiểm tra',     val: doneCount,   color: 'bg-blue-600',     icon: 'fa-tasks' },
-                        { label: 'Đạt chuẩn',       val: okCount,     color: 'bg-emerald-600',  icon: 'fa-check-circle' },
-                        { label: 'Cần sửa',         val: brokenCount, color: 'bg-red-500',      icon: 'fa-tools' },
+                        {label:'Tổng máy',     val:total,       color:'bg-slate-800',   icon:'fa-desktop'},
+                        {label:'Đã kiểm tra',  val:doneCount,   color:'bg-blue-600',    icon:'fa-tasks'},
+                        {label:'Đạt chuẩn',    val:okCount,     color:'bg-emerald-600', icon:'fa-check-circle'},
+                        {label:'Cần sửa',      val:brokenCount, color:'bg-red-500',     icon:'fa-tools'},
                     ].map(s => (
                         <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
                             <div className={`w-10 h-10 ${s.color} rounded-xl flex items-center justify-center shrink-0`}>
@@ -469,28 +598,30 @@ function App() {
                     ))}
                 </div>
 
-                {/* Progress overall */}
+                {/* Progress */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-semibold text-slate-700">Tiến độ tổng thể</span>
                         <span className="text-sm font-extrabold text-blue-600">{progress}%</span>
                     </div>
                     <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="progress-bar h-full bg-gradient-to-r from-blue-500 via-violet-500 to-emerald-500 rounded-full" style={{ width: `${progress}%` }} />
+                        <div className="progress-bar h-full bg-gradient-to-r from-blue-500 via-violet-500 to-emerald-500 rounded-full" style={{width:`${progress}%`}}/>
                     </div>
                 </div>
 
                 {/* ── TABS ── */}
-                <div className="flex gap-2">
-                    {['B406', 'B407', 'B409'].map(r => {
-                        const roomMs = machines.filter(m => m.room === r);
-                        const roomOk = roomMs.filter(m => m.status === 'ok').length;
-                        const roomBroken = roomMs.filter(m => m.status === 'broken').length;
+                <div className="flex gap-2 flex-wrap">
+                    {config.map(r => {
+                        const rms = machines.filter(m=>m.room===r.name);
+                        const rOk = rms.filter(m=>m.status==='ok').length;
+                        const rBr = rms.filter(m=>m.status==='broken').length;
                         return (
-                            <button key={r} onClick={() => setRoom(r)}
-                                className={`flex-1 py-3 px-4 rounded-2xl font-bold text-sm transition-all flex flex-col items-center gap-0.5 border-2 ${room === r ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-                                <span>Phòng {r}</span>
-                                <span className={`text-xs font-medium ${room === r ? 'text-blue-100' : 'text-slate-400'}`}>✅{roomOk} ❌{roomBroken}</span>
+                            <button key={r.name} onClick={()=>setRoom(r.name)}
+                                className={`flex-1 min-w-[100px] py-3 px-4 rounded-2xl font-bold text-sm transition-all flex flex-col items-center gap-0.5 border-2 ${room===r.name?'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200':'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                                <span>Phòng {r.name}</span>
+                                <span className={`text-xs font-medium ${room===r.name?'text-blue-100':'text-slate-400'}`}>
+                                    {rms.length} máy · ✅{rOk} ❌{rBr}
+                                </span>
                             </button>
                         );
                     })}
@@ -504,7 +635,7 @@ function App() {
                             Máy chính
                             <span className="text-xs font-normal text-slate-400 ml-1">({mainList.length} máy)</span>
                         </h3>
-                        <MachineGrid list={mainList} />
+                        {mainList.length > 0 ? <MachineGrid list={mainList}/> : <p className="text-sm text-slate-400 italic">Không có máy chính nào</p>}
                     </div>
                     <div>
                         <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 mb-4">
@@ -512,13 +643,11 @@ function App() {
                             Máy dự phòng
                             <span className="text-xs font-normal text-slate-400 ml-1">({backupList.length} máy)</span>
                         </h3>
-                        <MachineGrid list={backupList} />
+                        {backupList.length > 0 ? <MachineGrid list={backupList}/> : <p className="text-sm text-slate-400 italic">Không có máy dự phòng</p>}
                     </div>
-
-                    {/* Legend */}
                     <div className="flex items-center gap-5 pt-3 border-t border-slate-100">
                         <span className="text-xs text-slate-500 font-medium">Chú thích:</span>
-                        {[['bg-green-100 border-green-300','text-green-500 fa-check','Đạt chuẩn'],['bg-red-100 border-red-300','text-red-400 fa-times','Hỏng'],['bg-white border-slate-200','text-slate-300 fa-desktop','Chưa test']].map(([bg, ic, lb]) => (
+                        {[['bg-green-100 border-green-300','text-green-500 fa-check','Đạt chuẩn'],['bg-red-100 border-red-300','text-red-400 fa-times','Hỏng'],['bg-white border-slate-200','text-slate-300 fa-desktop','Chưa test']].map(([bg,ic,lb])=>(
                             <div key={lb} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${bg}`}>
                                 <i className={`fas ${ic} text-xs`}></i>
                                 <span className="text-xs text-slate-600 font-medium">{lb}</span>
@@ -526,15 +655,17 @@ function App() {
                         ))}
                     </div>
                 </div>
+
             </div>
 
-            {selected && <TestModal machine={selected} onClose={() => setSelected(null)} onSave={handleSave} />}
-            {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+            {showEdit  && <EditRoomModal config={config} onClose={()=>setShowEdit(false)} onSave={handleSaveConfig}/>}
+            {selected  && <TestModal machine={selected} onClose={()=>setSelected(null)} onSave={handleSave}/>}
+            {toast     && <Toast {...toast} onClose={()=>setToast(null)}/>}
         </div>
     );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
